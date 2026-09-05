@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
   build:
@@ -82,8 +84,6 @@ jobs:
               -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-          # First editor launch creates the per-user settings file. Godot reads
-          # JAVA_HOME and ANDROID_HOME as Android export defaults.
           godot --headless --editor --path "$GITHUB_WORKSPACE" --quit-after 2 || true
 
           SETTINGS=$(find "$HOME/.config/godot" -type f -name 'editor_settings-*.tres' | head -1)
