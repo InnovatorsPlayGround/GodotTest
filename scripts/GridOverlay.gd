@@ -10,7 +10,7 @@ var line_color := Color(1.0, 1.0, 1.0, 0.08)
 var axis_color := Color(0.72, 0.92, 1.0, 0.18)
 
 func _ready():
-	z_index = -1000000
+	z_index = -100
 	queue_redraw()
 
 func set_enabled(value: bool):
