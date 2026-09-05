@@ -17,7 +17,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -44,17 +44,28 @@ jobs:
           echo "Expansion sprites: $(find assets/expansion -name '*.png' | wc -l)"
           python3 tools/generate_catalog.py
 
-      - name: Ensure Android SDK packages
+      - name: Ensure Godot Android SDK requirements
         shell: bash
         run: |
-          set -e
+          set -euxo pipefail
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           if [ ! -x "$SDKMANAGER" ]; then
             SDKMANAGER=$(find "$ANDROID_HOME" -type f -name sdkmanager | head -1)
           fi
+          echo "Using sdkmanager: $SDKMANAGER"
           yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0" || \
-            "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.1"
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "build-tools;35.0.1" \
+            "platforms;android-35" \
+            "cmdline-tools;latest" \
+            "cmake;3.10.2.4988404" \
+            "ndk;28.1.13356709"
+          test -x "$ANDROID_HOME/platform-tools/adb"
+          test -d "$ANDROID_HOME/build-tools/35.0.1"
+          test -d "$ANDROID_HOME/platforms/android-35"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "JAVA_HOME=$JAVA_HOME"
 
       - name: Install Godot 4.4.1 and export templates
         shell: bash
@@ -72,6 +83,7 @@ jobs:
           mkdir -p /tmp/godot_templates "$HOME/.local/share/godot/export_templates/4.4.1.stable"
           unzip -q /tmp/templates.tpz -d /tmp/godot_templates
           cp -R /tmp/godot_templates/templates/. "$HOME/.local/share/godot/export_templates/4.4.1.stable/"
+          test -f "$HOME/.local/share/godot/export_templates/4.4.1.stable/android_debug.apk"
 
       - name: Configure Godot Android export
         shell: bash
@@ -87,6 +99,7 @@ jobs:
           godot --headless --editor --path "$GITHUB_WORKSPACE" --quit-after 2 || true
 
           SETTINGS=$(find "$HOME/.config/godot" -type f -name 'editor_settings-*.tres' | head -1)
+          test -n "$SETTINGS"
           echo "Godot settings: $SETTINGS"
           python3 - "$SETTINGS" <<'PY'
           import os, re, sys
@@ -109,6 +122,8 @@ jobs:
                   text = text.replace('[resource]\n', '[resource]\n' + line + '\n', 1)
           path.write_text(text)
           PY
+          grep -n "export/android" "$SETTINGS" || true
+          keytool -list -keystore "$KEYSTORE" -storepass android -alias androiddebugkey >/dev/null
 
       - name: Validate Godot project
         shell: bash
@@ -121,10 +136,16 @@ jobs:
 
       - name: Export debug APK
         shell: bash
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: /home/runner/.local/share/godot/keystores/debug.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
         run: |
           set -euxo pipefail
           mkdir -p build
-          godot --headless --path "$GITHUB_WORKSPACE" --export-debug "Android" build/SketchWorldBuilder-v0.1.apk
+          godot --headless --verbose --path "$GITHUB_WORKSPACE" --export-debug "Android" build/SketchWorldBuilder-v0.1.apk 2>&1 | tee /tmp/godot-export.log
+          test -s build/SketchWorldBuilder-v0.1.apk
+          unzip -t build/SketchWorldBuilder-v0.1.apk >/dev/null
           ls -lh build/SketchWorldBuilder-v0.1.apk
 
       - name: Upload APK
