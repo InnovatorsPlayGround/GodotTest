@@ -27,11 +27,18 @@ func _toast(message: String):
 	toast_label.visible = true
 	toast_timer.start()
 
+func _is_ui_touch(screen_pos: Vector2) -> bool:
+	var viewport_h := get_viewport_rect().size.y
+	return screen_pos.y <= TOP_TOUCH_GUARD or screen_pos.y >= viewport_h - BOTTOM_TOUCH_GUARD
+
 func _unhandled_input(event: InputEvent):
-	# Touch
+	# Mobile is the primary input path. GUI controls receive touch-as-mouse,
+	# while world gestures stay on raw touch events so they don't fight each other.
 	if event is InputEventScreenTouch:
 		var idx: int = event.index
 		if event.pressed:
+			if _is_ui_touch(event.position):
+				return
 			touch_points[idx] = event.position
 			if touch_points.size() == 1:
 				touch_start = event.position
@@ -47,6 +54,8 @@ func _unhandled_input(event: InputEvent):
 				pinch_start_distance = maxf(1.0, Vector2(pts[0]).distance_to(Vector2(pts[1])))
 				pinch_start_zoom = camera.zoom.x
 		else:
+			if not touch_points.has(idx):
+				return
 			touch_points.erase(idx)
 			if pinch_active:
 				if touch_points.size() < 2:
@@ -61,6 +70,8 @@ func _unhandled_input(event: InputEvent):
 		return
 
 	if event is InputEventScreenDrag:
+		if not touch_points.has(event.index):
+			return
 		touch_points[event.index] = event.position
 		if touch_points.size() >= 2:
 			pinch_active = true
@@ -71,7 +82,7 @@ func _unhandled_input(event: InputEvent):
 			camera.zoom = Vector2(z,z)
 		else:
 			var delta: Vector2 = event.position - touch_last
-			if event.position.distance_to(touch_start) > 10.0:
+			if event.position.distance_to(touch_start) > 12.0:
 				touch_moved = true
 			if touch_moved:
 				camera.position -= delta / camera.zoom.x
@@ -79,7 +90,12 @@ func _unhandled_input(event: InputEvent):
 		get_viewport().set_input_as_handled()
 		return
 
-	# Mouse / desktop testing
+	# On a touchscreen device, ignore emulated mouse events here. They exist only
+	# so Godot's Buttons/OptionButtons/ScrollContainers behave naturally.
+	if DisplayServer.is_touchscreen_available():
+		return
+
+	# Desktop fallback for development only.
 	if event is InputEventMouseMotion:
 		if mouse_dragging:
 			var delta: Vector2 = event.position - mouse_last
