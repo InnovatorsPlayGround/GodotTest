@@ -1,0 +1,231 @@
+eturn Vector2i(roundi(fx), roundi(fy))
+
+func _screen_to_world(screen_pos: Vector2) -> Vector2:
+	return get_viewport().get_canvas_transform().affine_inverse() * screen_pos
+
+func _update_cursor(cell: Vector2i):
+	cursor_grid = cell
+	cursor.position = _surface_center(cell, selected_height)
+	ghost.position = _sprite_center(cell, selected_height)
+
+func _update_ghost_texture():
+	if erase_mode:
+		ghost.visible = false
+		return
+	var entry: Dictionary = assets_by_family.get(selected_family, {})
+	var orientations: Dictionary = entry.get("orientations", {})
+	var path := str(orientations.get(selected_orientation, ""))
+	if path != "":
+		ghost.texture = load(path)
+		ghost.visible = true
+		ghost.position = _sprite_center(cursor_grid, selected_height)
+
+func _make_item(cell: Vector2i) -> Dictionary:
+	var entry: Dictionary = assets_by_family.get(selected_family, {})
+	var orientations: Dictionary = entry.get("orientations", {})
+	var path := str(orientations.get(selected_orientation, ""))
+	return {
+		"id": next_id,
+		"x": cell.x,
+		"y": cell.y,
+		"height": selected_height,
+		"family": selected_family,
+		"orientation": selected_orientation,
+		"path": path,
+		"sequence": next_id
+	}
+
+func _place_at(cell: Vector2i):
+	if erase_mode:
+		_erase_top_at(cell)
+		return
+	if not assets_by_family.has(selected_family):
+		return
+
+	var item := _make_item(cell)
+	if str(item.path) == "":
+		return
+	next_id += 1
+
+	# Re-placing the same family on the same cell/height updates it rather than
+	# creating invisible duplicates. Different families can freely stack.
+	var old_item = _find_same_family(cell, selected_height, selected_family)
+	if old_item != null:
+		if str(old_item.orientation) == selected_orientation:
+			return
+		_remove_item_by_id(int(old_item.id))
+		_add_item(item)
+		_push_history({"type":"replace", "old":old_item.duplicate(true), "new":item.duplicate(true)})
+	else:
+		_add_item(item)
+		_push_history({"type":"add", "item":item.duplicate(true)})
+	_save_world()
+
+func _add_item(item: Dictionary):
+	var path := str(item.get("path", ""))
+	if path == "":
+		var entry: Dictionary = assets_by_family.get(str(item.get("family","")), {})
+		var orientations: Dictionary = entry.get("orientations", {})
+		path = str(orientations.get(str(item.get("orientation","S")), ""))
+		item["path"] = path
+	if path == "":
+		return
+
+	var cell := Vector2i(int(item.x), int(item.y))
+	var height := int(item.height)
+	var wrapper := Node2D.new()
+	wrapper.name = "Piece_%d" % int(item.id)
+	# Y-sort uses the logical ground anchor, while the sprite is moved upward by build height.
+	# Tiny tie-breakers keep same-row/same-cell stacking deterministic without changing the look.
+	var tie := float(cell.x) * 0.01 + float(height) * 0.001 + float(int(item.get("sequence", 1)) % 1000) * 0.000001
+	wrapper.position = _iso_anchor(cell) + Vector2(0.0, tie)
+
+	var sprite := Sprite2D.new()
+	sprite.texture = load(path)
+	sprite.position = IMAGE_ALIGN + Vector2(0.0, -height * LEVEL_STEP)
+	wrapper.add_child(sprite)
+	world_root.add_child(wrapper)
+
+	nodes_by_id[int(item.id)] = wrapper
+	placements.append(item.duplicate(true))
+	next_id = maxi(next_id, int(item.id) + 1)
+
+func _remove_item_by_id(id_value: int) -> Dictionary:
+	var removed := {}
+	for i in range(placements.size() - 1, -1, -1):
+		if int(placements[i].id) == id_value:
+			removed = placements[i].duplicate(true)
+			placements.remove_at(i)
+			break
+	if nodes_by_id.has(id_value):
+		var node = nodes_by_id[id_value]
+		nodes_by_id.erase(id_value)
+		if is_instance_valid(node):
+			node.queue_free()
+	return removed
+
+func _find_same_family(cell: Vector2i, height: int, family: String):
+	for i in range(placements.size() - 1, -1, -1):
+		var item: Dictionary = placements[i]
+		if int(item.x) == cell.x and int(item.y) == cell.y and int(item.height) == height and str(item.family) == family:
+			return item.duplicate(true)
+	return null
+
+func _find_top_at(cell: Vector2i):
+	var best = null
+	for item in placements:
+		if int(item.x) != cell.x or int(item.y) != cell.y:
+			continue
+		if best == null:
+			best = item
+			continue
+		var h := int(item.height)
+		var bh := int(best.height)
+		if h > bh or (h == bh and int(item.sequence) > int(best.sequence)):
+			best = item
+	return null if best == null else best.duplicate(true)
+
+func _erase_top_at(cell: Vector2i):
+	var item = _find_top_at(cell)
+	if item == null:
+		_toast("Nothing to erase here")
+		return
+	_remove_item_by_id(int(item.id))
+	_push_history({"type":"erase", "item":item})
+	_save_world()
+
+func _push_history(command: Dictionary):
+	undo_stack.append(command)
+	if undo_stack.size() > MAX_HISTORY:
+		undo_stack.pop_front()
+	redo_stack.clear()
+	_update_history_buttons()
+
+func _undo():
+	if undo_stack.is_empty():
+		return
+	var command: Dictionary = undo_stack.pop_back()
+	var t := str(command.get("type",""))
+	if t == "add":
+		_remove_item_by_id(int(command.item.id))
+	elif t == "erase":
+		_add_item(command.item.duplicate(true))
+	elif t == "replace":
+		_remove_item_by_id(int(command.new.id))
+		_add_item(command.old.duplicate(true))
+	redo_stack.append(command)
+	_update_history_buttons()
+	_save_world()
+
+func _redo():
+	if redo_stack.is_empty():
+		return
+	var command: Dictionary = redo_stack.pop_back()
+	var t := str(command.get("type",""))
+	if t == "add":
+		_add_item(command.item.duplicate(true))
+	elif t == "erase":
+		_remove_item_by_id(int(command.item.id))
+	elif t == "replace":
+		_remove_item_by_id(int(command.old.id))
+		_add_item(command.new.duplicate(true))
+	undo_stack.append(command)
+	_update_history_buttons()
+	_save_world()
+
+func _update_history_buttons():
+	if undo_button != null:
+		undo_button.disabled = undo_stack.is_empty()
+	if redo_button != null:
+		redo_button.disabled = redo_stack.is_empty()
+
+func _confirm_new_world():
+	_clear_all_pieces()
+	undo_stack.clear()
+	redo_stack.clear()
+	next_id = 1
+	_seed_platform()
+	camera.position = Vector2(-12.0, 70.0)
+	camera.zoom = Vector2(0.72,0.72)
+	selected_height = 0
+	height_label.text = "H 0"
+	_update_history_buttons()
+	_save_world()
+	_toast("Fresh world ready")
+
+func _clear_all_pieces():
+	for node in nodes_by_id.values():
+		if is_instance_valid(node):
+			node.queue_free()
+	nodes_by_id.clear()
+	placements.clear()
+
+func _seed_platform():
+	if not assets_by_family.has("grass_center"):
+		return
+	var entry: Dictionary = assets_by_family["grass_center"]
+	var path := str(entry.orientations.get("S",""))
+	for gx in range(-3, 4):
+		for gy in range(-3, 4):
+			var item := {
+				"id": next_id,
+				"x": gx,
+				"y": gy,
+				"height": 0,
+				"family": "grass_center",
+				"orientation": "S",
+				"path": path,
+				"sequence": next_id
+			}
+			next_id += 1
+			_add_item(item)
+
+func _load_or_seed():
+	if FileAccess.file_exists(SAVE_PATH):
+		var file := FileAccess.open(SAVE_PATH, FileAccess.READ)
+		if file != null:
+			var parsed = JSON.parse_string(file.get_as_text())
+			if typeof(parsed) == TYPE_DICTIONARY:
+				var saved_placements = parsed.get("placements", [])
+				if typeof(saved_placements) == TYPE_ARRAY and saved_placements.size() > 0:
+					next_id = int(parsed.get("n
