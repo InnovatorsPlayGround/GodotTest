@@ -3,55 +3,60 @@ import json, re
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKS = [("town", ROOT / "assets" / "town"), ("expansion", ROOT / "assets" / "expansion")]
+ORDER = ["Terrain", "Paths", "Water", "Buildings", "Roofs", "Castle", "Farms", "Nature", "Decor"]
 
 
 def category_for(fam: str) -> str:
-    if fam.startswith("roof_"):
+    n = fam.lower().replace("-", "_")
+    if "roof" in n:
         return "Roofs"
-    if fam.startswith("castle_"):
+    if any(k in n for k in ("castle", "wall", "gate", "tower")):
         return "Castle"
-    if fam.startswith(("building_", "balcony_", "structure_")):
+    if any(k in n for k in ("building", "balcony", "structure", "house", "arch")):
         return "Buildings"
-    if fam.startswith("furrow") or fam.startswith("fence_") or fam == "well":
+    if any(k in n for k in ("farm", "furrow", "fence", "well", "crop", "field", "plant")):
         return "Farms"
-    if fam.startswith(("tree_", "rocks_")):
+    if any(k in n for k in ("tree", "rock", "bush", "shrub")):
         return "Nature"
-    if fam == "bridge" or fam.startswith("grass_path"):
+    if any(k in n for k in ("path", "road", "bridge", "stairs", "step")):
         return "Paths"
-    if fam.startswith(("water_", "grass_river", "grass_water")):
+    if any(k in n for k in ("water", "river", "stream")):
         return "Water"
-    if fam.startswith(("grass_", "cliff", "dirt_")):
+    if any(k in n for k in ("grass", "cliff", "dirt", "ground", "slope", "hill", "corner")):
         return "Terrain"
     return "Decor"
 
 
 def friendly(name: str) -> str:
-    s = name.replace("_", " ")
-    s = re.sub(r"([a-z])([A-Z])", r"\1 \2", s)
-    s = re.sub(r"(Beige|Brown|Green|Purple)", r" \1", s)
+    s = name.replace("_", " ").replace("-", " ")
+    s = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", s)
+    s = re.sub(r"\s+", " ", s).strip()
     return " ".join(w.capitalize() for w in s.split())
 
 families = {}
 for pack, folder in PACKS:
     for p in sorted(folder.glob("*.png")):
-        m = re.match(r"(.+)_([NESW])\.png$", p.name)
+        m = re.match(r"(.+)_([NESW])\.png$", p.name, re.IGNORECASE)
         if not m:
             continue
         fam, orientation = m.groups()
+        orientation = orientation.upper()
         entry = families.setdefault(fam, {"family": fam, "pack": pack, "orientations": {}})
         entry["orientations"][orientation] = f"res://assets/{pack}/{p.name}"
 
 assets = []
-for fam in sorted(families):
+counts = {cat: 0 for cat in ORDER}
+for fam in sorted(families, key=str.lower):
     e = families[fam]
     e["category"] = category_for(fam)
     e["display_name"] = friendly(fam)
+    counts[e["category"]] += 1
     assets.append(e)
 
-catalog = {
-    "categories": ["Terrain", "Paths", "Water", "Buildings", "Roofs", "Castle", "Farms", "Nature", "Decor"],
-    "assets": assets,
-}
+categories = [cat for cat in ORDER if counts[cat] > 0]
+catalog = {"categories": categories, "assets": assets, "counts": counts}
 (ROOT / "assets").mkdir(exist_ok=True)
 (ROOT / "assets" / "catalog.json").write_text(json.dumps(catalog, indent=2), encoding="utf-8")
 print(f"Generated catalog with {len(assets)} asset families")
+for cat in categories:
+    print(f"  {cat}: {counts[cat]}")
