@@ -27,10 +27,10 @@ func _toast(message: String):
 	toast_label.visible = true
 	toast_timer.start()
 
-func _unhandled_input(event):
+func _unhandled_input(event: InputEvent):
 	# Touch
 	if event is InputEventScreenTouch:
-		var idx := event.index
+		var idx: int = event.index
 		if event.pressed:
 			touch_points[idx] = event.position
 			if touch_points.size() == 1:
@@ -70,7 +70,7 @@ func _unhandled_input(event):
 			var z := clampf(pinch_start_zoom * (dist / pinch_start_distance), 0.35, 2.5)
 			camera.zoom = Vector2(z,z)
 		else:
-			var delta := event.position - touch_last
+			var delta: Vector2 = event.position - touch_last
 			if event.position.distance_to(touch_start) > 10.0:
 				touch_moved = true
 			if touch_moved:
@@ -82,7 +82,7 @@ func _unhandled_input(event):
 	# Mouse / desktop testing
 	if event is InputEventMouseMotion:
 		if mouse_dragging:
-			var delta := event.position - mouse_last
+			var delta: Vector2 = event.position - mouse_last
 			if event.position.distance_to(mouse_start) > 6.0:
 				mouse_moved = true
 			if mouse_moved:
