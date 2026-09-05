@@ -114,7 +114,6 @@ func _refresh_asset_strip():
 		button.button_group = asset_group
 		button.focus_mode = Control.FOCUS_NONE
 		button.expand_icon = true
-		button.icon_max_width = 72
 		button.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.text = str(entry.get("display_name", family))
 		button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
