@@ -1,0 +1,130 @@
+ext_id", 1))
+					for item in saved_placements:
+						if typeof(item) == TYPE_DICTIONARY:
+							_add_item(item)
+					var cam = parsed.get("camera", {})
+					if typeof(cam) == TYPE_DICTIONARY:
+						camera.position = Vector2(float(cam.get("x",-12.0)), float(cam.get("y",70.0)))
+						var z := clampf(float(cam.get("zoom",0.72)), 0.35, 2.5)
+						camera.zoom = Vector2(z,z)
+					return
+	_seed_platform()
+	_save_world()
+
+func _save_world():
+	var data := {
+		"version": 1,
+		"next_id": next_id,
+		"placements": placements,
+		"camera": {"x": camera.position.x, "y": camera.position.y, "zoom": camera.zoom.x}
+	}
+	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if file != null:
+		file.store_string(JSON.stringify(data))
+
+func _toast(message: String):
+	toast_label.text = "  %s  " % message
+	toast_label.visible = true
+	toast_timer.start()
+
+func _unhandled_input(event):
+	# Touch
+	if event is InputEventScreenTouch:
+		var idx := event.index
+		if event.pressed:
+			touch_points[idx] = event.position
+			if touch_points.size() == 1:
+				touch_start = event.position
+				touch_last = event.position
+				touch_moved = false
+				gesture_consumed = false
+				var world := _screen_to_world(event.position)
+				_update_cursor(_world_to_grid(world, selected_height))
+			elif touch_points.size() == 2:
+				pinch_active = true
+				gesture_consumed = true
+				var pts: Array = touch_points.values()
+				pinch_start_distance = maxf(1.0, Vector2(pts[0]).distance_to(Vector2(pts[1])))
+				pinch_start_zoom = camera.zoom.x
+		else:
+			touch_points.erase(idx)
+			if pinch_active:
+				if touch_points.size() < 2:
+					pinch_active = false
+					gesture_consumed = true
+			elif not gesture_consumed and not touch_moved:
+				var world := _screen_to_world(event.position)
+				var cell := _world_to_grid(world, selected_height)
+				_update_cursor(cell)
+				_place_at(cell)
+		get_viewport().set_input_as_handled()
+		return
+
+	if event is InputEventScreenDrag:
+		touch_points[event.index] = event.position
+		if touch_points.size() >= 2:
+			pinch_active = true
+			gesture_consumed = true
+			var pts: Array = touch_points.values()
+			var dist := maxf(1.0, Vector2(pts[0]).distance_to(Vector2(pts[1])))
+			var z := clampf(pinch_start_zoom * (dist / pinch_start_distance), 0.35, 2.5)
+			camera.zoom = Vector2(z,z)
+		else:
+			var delta := event.position - touch_last
+			if event.position.distance_to(touch_start) > 10.0:
+				touch_moved = true
+			if touch_moved:
+				camera.position -= delta / camera.zoom.x
+			touch_last = event.position
+		get_viewport().set_input_as_handled()
+		return
+
+	# Mouse / desktop testing
+	if event is InputEventMouseMotion:
+		if mouse_dragging:
+			var delta := event.position - mouse_last
+			if event.position.distance_to(mouse_start) > 6.0:
+				mouse_moved = true
+			if mouse_moved:
+				camera.position -= delta / camera.zoom.x
+			mouse_last = event.position
+		else:
+			var world := _screen_to_world(event.position)
+			_update_cursor(_world_to_grid(world, selected_height))
+		return
+
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
+			_zoom_by(1.12)
+			get_viewport().set_input_as_handled()
+			return
+		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
+			_zoom_by(1.0 / 1.12)
+			get_viewport().set_input_as_handled()
+			return
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				mouse_dragging = true
+				mouse_start = event.position
+				mouse_last = event.position
+				mouse_moved = false
+			else:
+				if mouse_dragging and not mouse_moved:
+					var world := _screen_to_world(event.position)
+					var cell := _world_to_grid(world, selected_height)
+					_update_cursor(cell)
+					_place_at(cell)
+				mouse_dragging = false
+			get_viewport().set_input_as_handled()
+			return
+		if event.button_index == MOUSE_BUTTON_MIDDLE:
+			mouse_dragging = event.pressed
+			mouse_start = event.position
+			mouse_last = event.position
+			mouse_moved = false
+			get_viewport().set_input_as_handled()
+
+func _zoom_by(factor: float):
+	var z := clampf(camera.zoom.x * factor, 0.35, 2.5)
+	camera.zoom = Vector2(z,z)
+	_save_world()
