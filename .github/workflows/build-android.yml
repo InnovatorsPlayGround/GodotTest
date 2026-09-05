@@ -22,12 +22,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Reconstruct game script
+      - name: Reconstruct legacy script
         shell: bash
         run: |
           mkdir -p scripts
           cat srcparts/main_00.txt srcparts/main_01.txt srcparts/main_02.txt srcparts/main_03.txt > scripts/Main.gd
-          echo "Main.gd bytes: $(wc -c < scripts/Main.gd)"
 
       - name: Download supplied Kenney asset packs
         shell: bash
@@ -40,19 +39,15 @@ jobs:
           unzip -q /tmp/expansion.zip -d /tmp/expansion
           find /tmp/town -type f -path '*/Tiles/*.png' -exec cp {} assets/town/ \;
           find /tmp/expansion -type f -path '*/Tiles/*.png' -exec cp {} assets/expansion/ \;
-          echo "Town sprites: $(find assets/town -name '*.png' | wc -l)"
-          echo "Expansion sprites: $(find assets/expansion -name '*.png' | wc -l)"
           python3 tools/generate_catalog.py
           python3 - <<'PY'
           import json
           c=json.load(open('assets/catalog.json'))
           counts=c['counts']
           print('Catalog counts:', counts)
-          assert len(c['assets']) >= 100, 'Catalog unexpectedly tiny'
-          assert counts.get('Terrain',0) > 0
-          assert counts.get('Paths',0) > 0, 'Path assets were not categorized'
-          assert counts.get('Farms',0) > 0, 'Farm assets were not categorized'
-          assert counts.get('Buildings',0) > 0, 'Building assets were not categorized'
+          assert len(c['assets']) >= 100
+          for key in ('Terrain','Paths','Farms','Buildings','Water'):
+              assert counts.get(key,0) > 0, f'{key} catalogue is empty'
           PY
 
       - name: Ensure Godot Android SDK requirements
@@ -60,9 +55,7 @@ jobs:
         run: |
           set -euxo pipefail
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -x "$SDKMANAGER" ]; then
-            SDKMANAGER=$(find "$ANDROID_HOME" -type f -name sdkmanager | head -1)
-          fi
+          if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER=$(find "$ANDROID_HOME" -type f -name sdkmanager | head -1); fi
           yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
           "$SDKMANAGER" "platform-tools" "build-tools;35.0.1" "platforms;android-35" "cmdline-tools;latest" "cmake;3.10.2.4988404" "ndk;28.1.13356709"
 
@@ -92,7 +85,7 @@ jobs:
           godot --headless --editor --path "$GITHUB_WORKSPACE" --quit-after 2 || true
           SETTINGS=$(find "$HOME/.config/godot" -type f -name 'editor_settings-*.tres' | head -1)
           python3 - "$SETTINGS" <<'PY'
-          import os, re, sys
+          import os,re,sys
           from pathlib import Path
           path=Path(sys.argv[1]); text=path.read_text()
           vals={'export/android/android_sdk_path':os.environ['ANDROID_HOME'],'export/android/java_sdk_path':os.environ['JAVA_HOME'],'export/android/debug_keystore':str(Path.home()/'.local/share/godot/keystores/debug.keystore'),'export/android/debug_keystore_user':'androiddebugkey','export/android/debug_keystore_pass':'android'}
@@ -106,9 +99,9 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          godot --headless --editor --path "$GITHUB_WORKSPACE" --quit-after 4 2>&1 | tee /tmp/godot-import.log
+          godot --headless --editor --path "$GITHUB_WORKSPACE" --quit-after 5 2>&1 | tee /tmp/godot-import.log
           if grep -E "SCRIPT ERROR|Parse Error" /tmp/godot-import.log; then exit 1; fi
-          timeout 6s godot --headless --path "$GITHUB_WORKSPACE" 2>&1 | tee /tmp/godot-runtime.log || true
+          timeout 8s godot --headless --path "$GITHUB_WORKSPACE" 2>&1 | tee /tmp/godot-runtime.log || true
           if grep -E "SCRIPT ERROR|Invalid call|Parse Error" /tmp/godot-runtime.log; then exit 1; fi
 
       - name: Export debug APK
@@ -120,15 +113,15 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p build
-          godot --headless --verbose --path "$GITHUB_WORKSPACE" --export-debug "Android" build/SketchWorldBuilder-v0.3.apk 2>&1 | tee /tmp/godot-export.log
-          test -s build/SketchWorldBuilder-v0.3.apk
-          unzip -t build/SketchWorldBuilder-v0.3.apk >/dev/null
-          ls -lh build/SketchWorldBuilder-v0.3.apk
+          godot --headless --verbose --path "$GITHUB_WORKSPACE" --export-debug "Android" build/SketchWorldBuilder-v0.4.apk 2>&1 | tee /tmp/godot-export.log
+          test -s build/SketchWorldBuilder-v0.4.apk
+          unzip -t build/SketchWorldBuilder-v0.4.apk >/dev/null
+          ls -lh build/SketchWorldBuilder-v0.4.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: SketchWorldBuilder-v0.3-APK
-          path: build/SketchWorldBuilder-v0.3.apk
+          name: SketchWorldBuilder-v0.4-APK
+          path: build/SketchWorldBuilder-v0.4.apk
           if-no-files-found: error
           retention-days: 14
