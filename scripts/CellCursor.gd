@@ -6,7 +6,7 @@ const TILE_H := 110.0
 var cursor_color := Color(0.55, 0.88, 1.0, 0.95)
 
 func _ready():
-	z_index = 2000000000
+	z_index = 100
 	queue_redraw()
 
 func _draw():
