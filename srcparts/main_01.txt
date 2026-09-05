@@ -1,0 +1,190 @@
+lected_category)))
+	category_picker.item_selected.connect(_on_category_selected)
+	palette_head.add_child(category_picker)
+
+	selected_label = Label.new()
+	selected_label.text = "Select a piece"
+	selected_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	selected_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	selected_label.add_theme_color_override("font_color", Color(0.86,0.91,0.96))
+	selected_label.add_theme_font_size_override("font_size", 16)
+	palette_head.add_child(selected_label)
+
+	var hint := Label.new()
+	hint.text = "Tap place  •  drag pan  •  pinch zoom"
+	hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hint.add_theme_color_override("font_color", Color(0.56,0.65,0.75))
+	hint.add_theme_font_size_override("font_size", 13)
+	palette_head.add_child(hint)
+
+	asset_scroll = ScrollContainer.new()
+	asset_scroll.custom_minimum_size = Vector2(0, 88)
+	asset_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	palette_v.add_child(asset_scroll)
+
+	asset_strip = HBoxContainer.new()
+	asset_strip.add_theme_constant_override("separation", 6)
+	asset_scroll.add_child(asset_strip)
+
+	# Toast
+	toast_label = Label.new()
+	toast_label.visible = false
+	toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	toast_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	toast_label.add_theme_font_size_override("font_size", 15)
+	toast_label.add_theme_color_override("font_color", Color.WHITE)
+	toast_label.add_theme_stylebox_override("normal", _style(Color(0.08,0.10,0.13,0.92), 12, Color(1,1,1,0.08), 1))
+	toast_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	toast_label.position = Vector2(-125, 70)
+	toast_label.size = Vector2(250, 42)
+	root_control.add_child(toast_label)
+
+	toast_timer = Timer.new()
+	toast_timer.one_shot = true
+	toast_timer.wait_time = 1.4
+	toast_timer.timeout.connect(func(): toast_label.visible = false)
+	add_child(toast_timer)
+
+	clear_dialog = ConfirmationDialog.new()
+	clear_dialog.title = "Start a new world?"
+	clear_dialog.dialog_text = "This clears the current build and creates a fresh grass platform."
+	clear_dialog.ok_button_text = "Start new"
+	clear_dialog.cancel_button_text = "Cancel"
+	clear_dialog.confirmed.connect(_confirm_new_world)
+	ui_layer.add_child(clear_dialog)
+
+	_refresh_asset_strip()
+
+func _style(bg: Color, radius: int, border: Color, border_width: int) -> StyleBoxFlat:
+	var s := StyleBoxFlat.new()
+	s.bg_color = bg
+	s.corner_radius_top_left = radius
+	s.corner_radius_top_right = radius
+	s.corner_radius_bottom_left = radius
+	s.corner_radius_bottom_right = radius
+	s.border_color = border
+	s.border_width_left = border_width
+	s.border_width_top = border_width
+	s.border_width_right = border_width
+	s.border_width_bottom = border_width
+	s.content_margin_left = 10
+	s.content_margin_right = 10
+	s.content_margin_top = 8
+	s.content_margin_bottom = 8
+	return s
+
+func _tool_button(text_value: String, tooltip_value: String) -> Button:
+	var b := Button.new()
+	b.text = text_value
+	b.tooltip_text = tooltip_value
+	b.custom_minimum_size = Vector2(46, 44)
+	b.focus_mode = Control.FOCUS_NONE
+	b.add_theme_font_size_override("font_size", 17)
+	return b
+
+func _on_category_selected(index: int):
+	if index < 0 or index >= categories.size():
+		return
+	selected_category = str(categories[index])
+	_refresh_asset_strip()
+
+func _refresh_asset_strip():
+	for child in asset_strip.get_children():
+		child.queue_free()
+	asset_group = ButtonGroup.new()
+	var entries: Array = assets_by_category.get(selected_category, [])
+	for entry in entries:
+		var family := str(entry.get("family", ""))
+		var button := Button.new()
+		button.custom_minimum_size = Vector2(78, 78)
+		button.toggle_mode = true
+		button.button_group = asset_group
+		button.focus_mode = Control.FOCUS_NONE
+		button.expand_icon = true
+		button.icon_max_width = 68
+		button.tooltip_text = str(entry.get("display_name", family))
+		var orientations: Dictionary = entry.get("orientations", {})
+		var thumb_path := str(orientations.get("S", orientations.get("N", "")))
+		if thumb_path != "":
+			button.icon = load(thumb_path)
+		button.button_pressed = family == selected_family
+		var family_name := family
+		button.pressed.connect(func(): _select_asset(family_name))
+		asset_strip.add_child(button)
+
+func _select_asset(family: String):
+	if not assets_by_family.has(family):
+		return
+	selected_family = family
+	var entry: Dictionary = assets_by_family[family]
+	selected_category = str(entry.get("category", selected_category))
+	if categories.find(selected_category) >= 0:
+		category_picker.select(categories.find(selected_category))
+	var orientations: Dictionary = entry.get("orientations", {})
+	if not orientations.has(selected_orientation):
+		selected_orientation = "S" if orientations.has("S") else str(orientations.keys()[0])
+	erase_mode = false
+	erase_button.button_pressed = false
+	_update_selected_label()
+	_update_ghost_texture()
+	_refresh_pressed_state_only()
+
+func _refresh_pressed_state_only():
+	for child in asset_strip.get_children():
+		if child is Button:
+			var btn: Button = child
+			btn.button_pressed = btn.tooltip_text == str(assets_by_family.get(selected_family, {}).get("display_name", ""))
+
+func _update_selected_label():
+	if erase_mode:
+		selected_label.text = "ERASER • tap a cell to remove the top piece"
+		return
+	var entry: Dictionary = assets_by_family.get(selected_family, {})
+	var name := str(entry.get("display_name", selected_family))
+	selected_label.text = "%s  •  %s" % [name, selected_orientation]
+
+func _rotate():
+	if erase_mode:
+		return
+	var entry: Dictionary = assets_by_family.get(selected_family, {})
+	var orientations: Dictionary = entry.get("orientations", {})
+	var order := ["N", "E", "S", "W"]
+	var start := order.find(selected_orientation)
+	for i in range(1, 5):
+		var candidate: String = order[(start + i) % 4]
+		if orientations.has(candidate):
+			selected_orientation = candidate
+			break
+	_update_selected_label()
+	_update_ghost_texture()
+
+func _change_height(delta: int):
+	selected_height = clampi(selected_height + delta, -2, 12)
+	height_label.text = "H %d" % selected_height
+	_update_cursor(cursor_grid)
+	_update_ghost_texture()
+
+func _set_erase_mode(enabled: bool):
+	erase_mode = enabled
+	ghost.visible = not enabled
+	_update_selected_label()
+
+func _set_grid_visible(enabled: bool):
+	grid_visible = enabled
+	if grid_overlay.has_method("set_enabled"):
+		grid_overlay.set_enabled(enabled)
+
+func _iso_anchor(cell: Vector2i) -> Vector2:
+	return Vector2((cell.x - cell.y) * HALF_W, (cell.x + cell.y) * HALF_H)
+
+func _surface_center(cell: Vector2i, height: int = 0) -> Vector2:
+	return _iso_anchor(cell) + SURFACE_OFFSET + Vector2(0.0, -height * LEVEL_STEP)
+
+func _sprite_center(cell: Vector2i, height: int = 0) -> Vector2:
+	return _iso_anchor(cell) + IMAGE_ALIGN + Vector2(0.0, -height * LEVEL_STEP)
+
+func _world_to_grid(world_pos: Vector2, height: int = 0) -> Vector2i:
+	var p := world_pos - SURFACE_OFFSET - Vector2(0.0, -height * LEVEL_STEP)
+	var fx := (p.x / HALF_W + p.y / HALF_H) * 0.5
+	var fy := (p.y / HALF_H - p.x / HALF_W) * 0.5
+	r
