@@ -11,19 +11,23 @@ lected_category)))
 	palette_head.add_child(selected_label)
 
 	var hint := Label.new()
-	hint.text = "Tap place  •  drag pan  •  pinch zoom"
+	hint.text = "Tap build  •  drag move  •  pinch zoom"
 	hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	hint.add_theme_color_override("font_color", Color(0.56,0.65,0.75))
 	hint.add_theme_font_size_override("font_size", 13)
 	palette_head.add_child(hint)
 
 	asset_scroll = ScrollContainer.new()
-	asset_scroll.custom_minimum_size = Vector2(0, 88)
+	asset_scroll.custom_minimum_size = Vector2(0, 112)
 	asset_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	asset_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	asset_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	asset_scroll.scroll_deadzone = 12
 	palette_v.add_child(asset_scroll)
 
 	asset_strip = HBoxContainer.new()
-	asset_strip.add_theme_constant_override("separation", 6)
+	asset_strip.add_theme_constant_override("separation", 8)
+	asset_strip.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	asset_scroll.add_child(asset_strip)
 
 	# Toast
@@ -35,7 +39,7 @@ lected_category)))
 	toast_label.add_theme_color_override("font_color", Color.WHITE)
 	toast_label.add_theme_stylebox_override("normal", _style(Color(0.08,0.10,0.13,0.92), 12, Color(1,1,1,0.08), 1))
 	toast_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	toast_label.position = Vector2(-125, 70)
+	toast_label.position = Vector2(-125, 78)
 	toast_label.size = Vector2(250, 42)
 	root_control.add_child(toast_label)
 
@@ -77,9 +81,9 @@ func _tool_button(text_value: String, tooltip_value: String) -> Button:
 	var b := Button.new()
 	b.text = text_value
 	b.tooltip_text = tooltip_value
-	b.custom_minimum_size = Vector2(46, 44)
+	b.custom_minimum_size = Vector2(58, 54)
 	b.focus_mode = Control.FOCUS_NONE
-	b.add_theme_font_size_override("font_size", 17)
+	b.add_theme_font_size_override("font_size", 19)
 	return b
 
 func _on_category_selected(index: int):
@@ -87,21 +91,33 @@ func _on_category_selected(index: int):
 		return
 	selected_category = str(categories[index])
 	_refresh_asset_strip()
+	# Mobile-first behaviour: changing category immediately selects a valid piece,
+	# so the user always gets visible feedback and can place it straight away.
+	var entries: Array = assets_by_category.get(selected_category, [])
+	if entries.is_empty():
+		_toast("No pieces found in %s" % selected_category)
+		return
+	_select_asset(str(entries[0].get("family", "")))
+	_toast("%s • %d pieces" % [selected_category, entries.size()])
 
 func _refresh_asset_strip():
 	for child in asset_strip.get_children():
+		asset_strip.remove_child(child)
 		child.queue_free()
 	asset_group = ButtonGroup.new()
 	var entries: Array = assets_by_category.get(selected_category, [])
 	for entry in entries:
 		var family := str(entry.get("family", ""))
 		var button := Button.new()
-		button.custom_minimum_size = Vector2(78, 78)
+		button.custom_minimum_size = Vector2(150, 100)
 		button.toggle_mode = true
 		button.button_group = asset_group
 		button.focus_mode = Control.FOCUS_NONE
 		button.expand_icon = true
-		button.icon_max_width = 68
+		button.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		button.text = str(entry.get("display_name", family))
+		button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		button.add_theme_font_size_override("font_size", 13)
 		button.tooltip_text = str(entry.get("display_name", family))
 		var orientations: Dictionary = entry.get("orientations", {})
 		var thumb_path := str(orientations.get("S", orientations.get("N", "")))
@@ -111,6 +127,7 @@ func _refresh_asset_strip():
 		var family_name := family
 		button.pressed.connect(func(): _select_asset(family_name))
 		asset_strip.add_child(button)
+	asset_strip.reset_size()
 
 func _select_asset(family: String):
 	if not assets_by_family.has(family):

@@ -17,17 +17,16 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Reconstruct game script
+      - name: Reconstruct legacy script
         shell: bash
         run: |
           mkdir -p scripts
           cat srcparts/main_00.txt srcparts/main_01.txt srcparts/main_02.txt srcparts/main_03.txt > scripts/Main.gd
-          echo "Main.gd bytes: $(wc -c < scripts/Main.gd)"
 
       - name: Download supplied Kenney asset packs
         shell: bash
@@ -40,21 +39,25 @@ jobs:
           unzip -q /tmp/expansion.zip -d /tmp/expansion
           find /tmp/town -type f -path '*/Tiles/*.png' -exec cp {} assets/town/ \;
           find /tmp/expansion -type f -path '*/Tiles/*.png' -exec cp {} assets/expansion/ \;
-          echo "Town sprites: $(find assets/town -name '*.png' | wc -l)"
-          echo "Expansion sprites: $(find assets/expansion -name '*.png' | wc -l)"
           python3 tools/generate_catalog.py
+          python3 - <<'PY'
+          import json
+          c=json.load(open('assets/catalog.json'))
+          counts=c['counts']
+          print('Catalog counts:', counts)
+          assert len(c['assets']) >= 100
+          for key in ('Terrain','Paths','Farms','Buildings','Water'):
+              assert counts.get(key,0) > 0, f'{key} catalogue is empty'
+          PY
 
-      - name: Ensure Android SDK packages
+      - name: Ensure Godot Android SDK requirements
         shell: bash
         run: |
-          set -e
+          set -euxo pipefail
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -x "$SDKMANAGER" ]; then
-            SDKMANAGER=$(find "$ANDROID_HOME" -type f -name sdkmanager | head -1)
-          fi
+          if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER=$(find "$ANDROID_HOME" -type f -name sdkmanager | head -1); fi
           yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0" || \
-            "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.1"
+          "$SDKMANAGER" "platform-tools" "build-tools;35.0.1" "platforms;android-35" "cmdline-tools;latest" "cmake;3.10.2.4988404" "ndk;28.1.13356709"
 
       - name: Install Godot 4.4.1 and export templates
         shell: bash
@@ -65,10 +68,7 @@ jobs:
           GODOT_BIN=$(find /tmp/godot -maxdepth 1 -type f -name 'Godot*' | head -1)
           chmod +x "$GODOT_BIN"
           sudo mv "$GODOT_BIN" /usr/local/bin/godot
-          godot --version
-
           curl -L --fail --retry 3 -o /tmp/templates.tpz https://github.com/godotengine/godot/releases/download/4.4.1-stable/Godot_v4.4.1-stable_export_templates.tpz
-          rm -rf /tmp/godot_templates
           mkdir -p /tmp/godot_templates "$HOME/.local/share/godot/export_templates/4.4.1.stable"
           unzip -q /tmp/templates.tpz -d /tmp/godot_templates
           cp -R /tmp/godot_templates/templates/. "$HOME/.local/share/godot/export_templates/4.4.1.stable/"
@@ -80,33 +80,18 @@ jobs:
           mkdir -p "$HOME/.local/share/godot/keystores"
           KEYSTORE="$HOME/.local/share/godot/keystores/debug.keystore"
           if [ ! -f "$KEYSTORE" ]; then
-            keytool -genkeypair -v -keystore "$KEYSTORE" -storepass android -alias androiddebugkey -keypass android \
-              -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+            keytool -genkeypair -v -keystore "$KEYSTORE" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
-
           godot --headless --editor --path "$GITHUB_WORKSPACE" --quit-after 2 || true
-
           SETTINGS=$(find "$HOME/.config/godot" -type f -name 'editor_settings-*.tres' | head -1)
-          echo "Godot settings: $SETTINGS"
           python3 - "$SETTINGS" <<'PY'
-          import os, re, sys
+          import os,re,sys
           from pathlib import Path
-          path = Path(sys.argv[1])
-          text = path.read_text()
-          values = {
-              'export/android/android_sdk_path': os.environ['ANDROID_HOME'],
-              'export/android/java_sdk_path': os.environ['JAVA_HOME'],
-              'export/android/debug_keystore': str(Path.home() / '.local/share/godot/keystores/debug.keystore'),
-              'export/android/debug_keystore_user': 'androiddebugkey',
-              'export/android/debug_keystore_pass': 'android',
-          }
-          for key, value in values.items():
-              line = f'{key} = "{value}"'
-              pattern = rf'(?m)^{re.escape(key)}\s*=.*$'
-              if re.search(pattern, text):
-                  text = re.sub(pattern, line, text)
-              else:
-                  text = text.replace('[resource]\n', '[resource]\n' + line + '\n', 1)
+          path=Path(sys.argv[1]); text=path.read_text()
+          vals={'export/android/android_sdk_path':os.environ['ANDROID_HOME'],'export/android/java_sdk_path':os.environ['JAVA_HOME'],'export/android/debug_keystore':str(Path.home()/'.local/share/godot/keystores/debug.keystore'),'export/android/debug_keystore_user':'androiddebugkey','export/android/debug_keystore_pass':'android'}
+          for k,v in vals.items():
+              line=f'{k} = "{v}"'; pat=rf'(?m)^{re.escape(k)}\s*=.*$'
+              text=re.sub(pat,line,text) if re.search(pat,text) else text.replace('[resource]\n','[resource]\n'+line+'\n',1)
           path.write_text(text)
           PY
 
@@ -114,23 +99,29 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          godot --headless --editor --path "$GITHUB_WORKSPACE" --quit-after 4 2>&1 | tee /tmp/godot-import.log
-          if grep -E "SCRIPT ERROR|Parse Error" /tmp/godot-import.log; then
-            exit 1
-          fi
+          godot --headless --editor --path "$GITHUB_WORKSPACE" --quit-after 5 2>&1 | tee /tmp/godot-import.log
+          if grep -E "SCRIPT ERROR|Parse Error" /tmp/godot-import.log; then exit 1; fi
+          timeout 8s godot --headless --path "$GITHUB_WORKSPACE" 2>&1 | tee /tmp/godot-runtime.log || true
+          if grep -E "SCRIPT ERROR|Invalid call|Parse Error" /tmp/godot-runtime.log; then exit 1; fi
 
       - name: Export debug APK
         shell: bash
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: /home/runner/.local/share/godot/keystores/debug.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
         run: |
           set -euxo pipefail
           mkdir -p build
-          godot --headless --path "$GITHUB_WORKSPACE" --export-debug "Android" build/SketchWorldBuilder-v0.1.apk
-          ls -lh build/SketchWorldBuilder-v0.1.apk
+          godot --headless --verbose --path "$GITHUB_WORKSPACE" --export-debug "Android" build/SketchWorldBuilder-v0.4.apk 2>&1 | tee /tmp/godot-export.log
+          test -s build/SketchWorldBuilder-v0.4.apk
+          unzip -t build/SketchWorldBuilder-v0.4.apk >/dev/null
+          ls -lh build/SketchWorldBuilder-v0.4.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: SketchWorldBuilder-v0.1-APK
-          path: build/SketchWorldBuilder-v0.1.apk
+          name: SketchWorldBuilder-v0.4-APK
+          path: build/SketchWorldBuilder-v0.4.apk
           if-no-files-found: error
           retention-days: 14
