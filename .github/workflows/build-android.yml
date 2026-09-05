@@ -143,15 +143,15 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p build
-          godot --headless --verbose --path "$GITHUB_WORKSPACE" --export-debug "Android" build/SketchWorldBuilder-v0.1.apk 2>&1 | tee /tmp/godot-export.log
-          test -s build/SketchWorldBuilder-v0.1.apk
-          unzip -t build/SketchWorldBuilder-v0.1.apk >/dev/null
-          ls -lh build/SketchWorldBuilder-v0.1.apk
+          godot --headless --verbose --path "$GITHUB_WORKSPACE" --export-debug "Android" build/SketchWorldBuilder-v0.2.apk 2>&1 | tee /tmp/godot-export.log
+          test -s build/SketchWorldBuilder-v0.2.apk
+          unzip -t build/SketchWorldBuilder-v0.2.apk >/dev/null
+          ls -lh build/SketchWorldBuilder-v0.2.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: SketchWorldBuilder-v0.1-APK
-          path: build/SketchWorldBuilder-v0.1.apk
+          name: SketchWorldBuilder-v0.2-APK
+          path: build/SketchWorldBuilder-v0.2.apk
           if-no-files-found: error
           retention-days: 14
