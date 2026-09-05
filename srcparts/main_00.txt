@@ -9,6 +9,8 @@ const SURFACE_OFFSET := Vector2(-12.0, -55.0)
 const LEVEL_STEP := 110.0
 const SAVE_PATH := "user://world.json"
 const MAX_HISTORY := 80
+const TOP_TOUCH_GUARD := 84.0
+const BOTTOM_TOUCH_GUARD := 190.0
 
 var catalog := {}
 var assets_by_family := {}
@@ -142,18 +144,19 @@ func _create_ui():
 
 	var top_panel := PanelContainer.new()
 	top_panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	top_panel.add_theme_stylebox_override("panel", _style(Color(0.055, 0.067, 0.09, 0.94), 16, Color(1,1,1,0.08), 1))
+	top_panel.add_theme_stylebox_override("panel", _style(Color(0.055, 0.067, 0.09, 0.96), 18, Color(1,1,1,0.08), 1))
 	top_margin.add_child(top_panel)
 
 	var top_bar := HBoxContainer.new()
-	top_bar.add_theme_constant_override("separation", 6)
+	top_bar.add_theme_constant_override("separation", 8)
 	top_panel.add_child(top_bar)
 
 	var title := Label.new()
-	title.text = "WORLD BUILDER"
+	title.text = "BUILD"
 	title.add_theme_font_size_override("font_size", 18)
 	title.add_theme_color_override("font_color", Color(0.92,0.96,1.0))
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	top_bar.add_child(title)
 
 	undo_button = _tool_button("↶", "Undo")
@@ -174,10 +177,11 @@ func _create_ui():
 
 	height_label = Label.new()
 	height_label.text = "H 0"
-	height_label.custom_minimum_size = Vector2(52, 44)
+	height_label.custom_minimum_size = Vector2(64, 54)
 	height_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	height_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	height_label.add_theme_color_override("font_color", Color(0.76,0.88,0.98))
+	height_label.add_theme_font_size_override("font_size", 16)
 	top_bar.add_child(height_label)
 
 	var plus_button := _tool_button("+", "Raise build height")
@@ -196,35 +200,36 @@ func _create_ui():
 	top_bar.add_child(grid_button)
 
 	var clear_button := _tool_button("NEW", "Start a new world")
-	clear_button.custom_minimum_size = Vector2(68,44)
-	clear_button.pressed.connect(func(): clear_dialog.popup_centered(Vector2i(420,180)))
+	clear_button.custom_minimum_size = Vector2(82,54)
+	clear_button.pressed.connect(func(): clear_dialog.popup_centered(Vector2i(520,220)))
 	top_bar.add_child(clear_button)
 
-	# Bottom palette
+	# Bottom palette: intentionally large touch targets for phones/tablets.
 	var bottom_margin := MarginContainer.new()
 	bottom_margin.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	bottom_margin.offset_left = 10
 	bottom_margin.offset_bottom = -10
 	bottom_margin.offset_right = -10
-	bottom_margin.offset_top = -150
+	bottom_margin.offset_top = -180
 	bottom_margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root_control.add_child(bottom_margin)
 
 	var bottom_panel := PanelContainer.new()
 	bottom_panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	bottom_panel.add_theme_stylebox_override("panel", _style(Color(0.055,0.067,0.09,0.96), 18, Color(1,1,1,0.08), 1))
+	bottom_panel.add_theme_stylebox_override("panel", _style(Color(0.055,0.067,0.09,0.97), 18, Color(1,1,1,0.08), 1))
 	bottom_margin.add_child(bottom_panel)
 
 	var palette_v := VBoxContainer.new()
-	palette_v.add_theme_constant_override("separation", 6)
+	palette_v.add_theme_constant_override("separation", 8)
 	bottom_panel.add_child(palette_v)
 
 	var palette_head := HBoxContainer.new()
-	palette_head.add_theme_constant_override("separation", 8)
+	palette_head.add_theme_constant_override("separation", 10)
 	palette_v.add_child(palette_head)
 
 	category_picker = OptionButton.new()
-	category_picker.custom_minimum_size = Vector2(165, 42)
+	category_picker.custom_minimum_size = Vector2(190, 52)
+	category_picker.add_theme_font_size_override("font_size", 16)
 	for cat in categories:
 		category_picker.add_item(str(cat))
 	category_picker.select(maxi(0, categories.find(se
