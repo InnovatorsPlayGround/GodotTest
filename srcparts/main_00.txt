@@ -1,0 +1,230 @@
+extends Node2D
+
+const TILE_W := 232.0
+const TILE_H := 110.0
+const HALF_W := TILE_W * 0.5
+const HALF_H := TILE_H * 0.5
+const IMAGE_ALIGN := Vector2(-12.0, -60.0)
+const SURFACE_OFFSET := Vector2(-12.0, -55.0)
+const LEVEL_STEP := 110.0
+const SAVE_PATH := "user://world.json"
+const MAX_HISTORY := 80
+
+var catalog := {}
+var assets_by_family := {}
+var assets_by_category := {}
+var categories := []
+
+var world_root: Node2D
+var grid_overlay: Node2D
+var camera: Camera2D
+var cursor: Node2D
+var ghost: Sprite2D
+
+var selected_category := "Terrain"
+var selected_family := "grass_center"
+var selected_orientation := "S"
+var selected_height := 0
+var erase_mode := false
+var grid_visible := true
+var cursor_grid := Vector2i.ZERO
+
+var placements: Array = []
+var nodes_by_id := {}
+var next_id := 1
+var undo_stack: Array = []
+var redo_stack: Array = []
+
+var ui_layer: CanvasLayer
+var category_picker: OptionButton
+var asset_strip: HBoxContainer
+var asset_scroll: ScrollContainer
+var selected_label: Label
+var height_label: Label
+var erase_button: Button
+var grid_button: Button
+var undo_button: Button
+var redo_button: Button
+var rotate_button: Button
+var asset_group: ButtonGroup
+var clear_dialog: ConfirmationDialog
+var toast_label: Label
+var toast_timer: Timer
+
+var touch_points := {}
+var touch_start := Vector2.ZERO
+var touch_last := Vector2.ZERO
+var touch_moved := false
+var pinch_active := false
+var gesture_consumed := false
+var pinch_start_distance := 0.0
+var pinch_start_zoom := 1.0
+var mouse_dragging := false
+var mouse_start := Vector2.ZERO
+var mouse_last := Vector2.ZERO
+var mouse_moved := false
+
+func _ready():
+	_load_catalog()
+	_create_world()
+	_create_ui()
+	_load_or_seed()
+	_select_asset(selected_family)
+	_update_cursor(Vector2i.ZERO)
+	_update_history_buttons()
+
+func _load_catalog():
+	var file := FileAccess.open("res://assets/catalog.json", FileAccess.READ)
+	if file == null:
+		push_error("Could not load asset catalog.")
+		return
+	var parsed = JSON.parse_string(file.get_as_text())
+	if typeof(parsed) != TYPE_DICTIONARY:
+		push_error("Asset catalog JSON is invalid.")
+		return
+	catalog = parsed
+	categories = catalog.get("categories", [])
+	for cat in categories:
+		assets_by_category[cat] = []
+	for entry in catalog.get("assets", []):
+		var family = str(entry.get("family", ""))
+		assets_by_family[family] = entry
+		var cat = str(entry.get("category", "Decor"))
+		if not assets_by_category.has(cat):
+			assets_by_category[cat] = []
+		assets_by_category[cat].append(entry)
+
+func _create_world():
+	grid_overlay = Node2D.new()
+	grid_overlay.set_script(load("res://scripts/GridOverlay.gd"))
+	add_child(grid_overlay)
+
+	world_root = Node2D.new()
+	world_root.name = "World"
+	world_root.y_sort_enabled = true
+	add_child(world_root)
+
+	cursor = Node2D.new()
+	cursor.name = "CellCursor"
+	cursor.set_script(load("res://scripts/CellCursor.gd"))
+	add_child(cursor)
+
+	ghost = Sprite2D.new()
+	ghost.name = "Ghost"
+	ghost.modulate = Color(1.0, 1.0, 1.0, 0.48)
+	ghost.z_index = 100
+	add_child(ghost)
+
+	camera = Camera2D.new()
+	camera.name = "Camera"
+	camera.enabled = true
+	camera.position = Vector2(-12.0, 70.0)
+	camera.zoom = Vector2(0.72, 0.72)
+	add_child(camera)
+
+func _create_ui():
+	ui_layer = CanvasLayer.new()
+	ui_layer.layer = 100
+	add_child(ui_layer)
+
+	var root_control := Control.new()
+	root_control.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root_control.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui_layer.add_child(root_control)
+
+	var top_margin := MarginContainer.new()
+	top_margin.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	top_margin.offset_left = 10
+	top_margin.offset_top = 8
+	top_margin.offset_right = -10
+	top_margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root_control.add_child(top_margin)
+
+	var top_panel := PanelContainer.new()
+	top_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	top_panel.add_theme_stylebox_override("panel", _style(Color(0.055, 0.067, 0.09, 0.94), 16, Color(1,1,1,0.08), 1))
+	top_margin.add_child(top_panel)
+
+	var top_bar := HBoxContainer.new()
+	top_bar.add_theme_constant_override("separation", 6)
+	top_panel.add_child(top_bar)
+
+	var title := Label.new()
+	title.text = "WORLD BUILDER"
+	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", Color(0.92,0.96,1.0))
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top_bar.add_child(title)
+
+	undo_button = _tool_button("↶", "Undo")
+	undo_button.pressed.connect(_undo)
+	top_bar.add_child(undo_button)
+
+	redo_button = _tool_button("↷", "Redo")
+	redo_button.pressed.connect(_redo)
+	top_bar.add_child(redo_button)
+
+	rotate_button = _tool_button("⟳", "Rotate")
+	rotate_button.pressed.connect(_rotate)
+	top_bar.add_child(rotate_button)
+
+	var minus_button := _tool_button("−", "Lower build height")
+	minus_button.pressed.connect(func(): _change_height(-1))
+	top_bar.add_child(minus_button)
+
+	height_label = Label.new()
+	height_label.text = "H 0"
+	height_label.custom_minimum_size = Vector2(52, 44)
+	height_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	height_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	height_label.add_theme_color_override("font_color", Color(0.76,0.88,0.98))
+	top_bar.add_child(height_label)
+
+	var plus_button := _tool_button("+", "Raise build height")
+	plus_button.pressed.connect(func(): _change_height(1))
+	top_bar.add_child(plus_button)
+
+	erase_button = _tool_button("⌫", "Erase top piece")
+	erase_button.toggle_mode = true
+	erase_button.toggled.connect(_set_erase_mode)
+	top_bar.add_child(erase_button)
+
+	grid_button = _tool_button("◇", "Toggle grid")
+	grid_button.toggle_mode = true
+	grid_button.button_pressed = true
+	grid_button.toggled.connect(_set_grid_visible)
+	top_bar.add_child(grid_button)
+
+	var clear_button := _tool_button("NEW", "Start a new world")
+	clear_button.custom_minimum_size = Vector2(68,44)
+	clear_button.pressed.connect(func(): clear_dialog.popup_centered(Vector2i(420,180)))
+	top_bar.add_child(clear_button)
+
+	# Bottom palette
+	var bottom_margin := MarginContainer.new()
+	bottom_margin.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	bottom_margin.offset_left = 10
+	bottom_margin.offset_bottom = -10
+	bottom_margin.offset_right = -10
+	bottom_margin.offset_top = -150
+	bottom_margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root_control.add_child(bottom_margin)
+
+	var bottom_panel := PanelContainer.new()
+	bottom_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	bottom_panel.add_theme_stylebox_override("panel", _style(Color(0.055,0.067,0.09,0.96), 18, Color(1,1,1,0.08), 1))
+	bottom_margin.add_child(bottom_panel)
+
+	var palette_v := VBoxContainer.new()
+	palette_v.add_theme_constant_override("separation", 6)
+	bottom_panel.add_child(palette_v)
+
+	var palette_head := HBoxContainer.new()
+	palette_head.add_theme_constant_override("separation", 8)
+	palette_v.add_child(palette_head)
+
+	category_picker = OptionButton.new()
+	category_picker.custom_minimum_size = Vector2(165, 42)
+	for cat in categories:
+		category_picker.add_item(str(cat))
+	category_picker.select(maxi(0, categories.find(se
